@@ -6,6 +6,7 @@
 Results are cached in results/<file name>.json, the baseline's alignment and features in
 results/_baseline_<name>.pkl, so re-running is instant.
 """
+import hashlib
 import json
 import pickle
 import sys
@@ -36,18 +37,32 @@ def _process(audio_path, transcript_text):
     return words, frames, feats
 
 
-def load_baseline(name="jfk", progress=None):
-    cfg = BASELINES[name]
+def baseline_config(baseline="jfk"):
+    """A baseline is either a built-in name ("jfk") or a dict made by custom_baseline()."""
+    if isinstance(baseline, dict):
+        return baseline
+    cfg = BASELINES[baseline]
+    return {"name": baseline, "label": "JFK, 1961 inaugural address", "audio": str(cfg["audio"]),
+            "transcript": cfg["transcript"].read_text(encoding="utf-8")}
+
+
+def custom_baseline(audio_path, transcript_text, label="Custom baseline"):
+    """Use ANY ideal recording + its transcript as the baseline (e.g. a coach reading a new script)."""
+    h = hashlib.md5(Path(audio_path).read_bytes() + transcript_text.encode("utf-8")).hexdigest()[:10]
+    return {"name": f"custom_{h}", "label": label, "audio": str(audio_path), "transcript": transcript_text}
+
+
+def load_baseline(baseline="jfk", progress=None):
+    cfg = baseline_config(baseline)
     RESULTS.mkdir(exist_ok=True)
-    cache = RESULTS / f"_baseline_{name}_v{PIPELINE_VERSION}.pkl"
-    audio = cfg["audio"]
+    cache = RESULTS / f"_baseline_{cfg['name']}_v{PIPELINE_VERSION}.pkl"
+    audio = Path(cfg["audio"])
     if cache.exists() and cache.stat().st_mtime > audio.stat().st_mtime:
         with open(cache, "rb") as f:
             return pickle.load(f)
     if progress:
         progress("Analysing the baseline (first run only)", 0.05)
-    text = cfg["transcript"].read_text(encoding="utf-8")
-    data = _process(audio, text)
+    data = _process(audio, cfg["transcript"])
     with open(cache, "wb") as f:
         pickle.dump(data, f)
     return data
@@ -56,15 +71,17 @@ def load_baseline(name="jfk", progress=None):
 def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use_cache=True):
     """progress(step_name, fraction) is called after each stage if given (for the UI)."""
     audio_path = Path(audio_path)
+    cfg = baseline_config(baseline)
     RESULTS.mkdir(exist_ok=True)
-    out_file = RESULTS / f"{audio_path.stem}.json"
+    suffix = "" if cfg["name"] == "jfk" else f"__{cfg['name']}"
+    out_file = RESULTS / f"{audio_path.stem}{suffix}.json"
     if use_cache and out_file.exists() and out_file.stat().st_mtime > audio_path.stat().st_mtime:
         cached = json.loads(out_file.read_text(encoding="utf-8"))
         if cached.get("pipeline_version") == PIPELINE_VERSION:
             return cached
 
     if not transcript_text or not transcript_text.strip():
-        transcript_text = BASELINES[baseline]["transcript"].read_text(encoding="utf-8")
+        transcript_text = cfg["transcript"]
 
     def step(name, frac):
         if progress:
@@ -84,7 +101,9 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
 
     result = {
         "file": audio_path.name,
-        "baseline": baseline,
+        "baseline": cfg["name"],
+        "baseline_label": cfg.get("label", cfg["name"]),
+        "baseline_audio": cfg["audio"],
         "duration": round(float(p_frames["duration"]), 2),
         "words": p_words,
         "overlay": overlay(p_frames, b_frames, p_words, b_words, p_feats, b_feats),
@@ -101,7 +120,7 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
 
 def region_spectra(audio_path, region, baseline="jfk"):
     """FFT + MFCC for one flaw region, participant vs baseline (same words). For the Spectrum tab."""
-    b_audio = BASELINES[baseline]["audio"]
+    b_audio = baseline_config(baseline)["audio"]
     _, b_frames, _ = load_baseline(baseline)
     p_frames = frame_features(audio_path)
     return {

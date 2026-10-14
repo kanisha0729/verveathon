@@ -15,6 +15,10 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from pipeline.analyze import analyze, region_spectra, BASELINES
+try:   # newer pipeline/analyze.py supports custom baselines; older versions still run
+    from pipeline.analyze import custom_baseline
+except ImportError:
+    custom_baseline = None
 
 ROOT = Path(__file__).resolve().parent
 LABELS = ROOT / "data/labels.csv"
@@ -55,10 +59,12 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 html, body, [class*="css"], .stMarkdown, .stText, button, input, textarea, select { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; }
 h1, h2, h3, h4 { font-family: 'Sora', 'Plus Jakarta Sans', sans-serif !important; letter-spacing: -0.01em; }
-#MainMenu, footer, header [data-testid="stToolbar"], [data-testid="stDecoration"] { visibility: hidden; height: 0; }
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { visibility: hidden; }
+header[data-testid="stHeader"] { background: transparent !important; height: 2.5rem; }
 .stApp { background: radial-gradient(1200px 600px at 10% -10%, rgba(139,92,246,0.18), transparent 60%),
                       radial-gradient(900px 500px at 100% 0%, rgba(45,212,191,0.14), transparent 60%), #0B1020; }
-.block-container { padding-top: 1.6rem; max-width: 1350px; }
+.block-container { padding-top: 3.6rem !important; max-width: 1350px; }
+.brand { line-height: 1.6; padding-top: 4px; }
 section[data-testid="stSidebar"] { background: rgba(15,20,38,0.92); border-right: 1px solid rgba(255,255,255,0.06); }
 .glass { border: 1px solid rgba(255,255,255,0.09); border-radius: 18px; padding: 18px 20px;
          background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)); }
@@ -131,32 +137,33 @@ def load_attempts():
         return []
 
 
-def save_attempt(name, result, audio_path):
+def save_attempt(name, result, audio_path, baseline="jfk"):
     attempts = load_attempts()
     attempts.append({"participant": name, "file": result["file"], "audio_path": str(audio_path),
                      "time": datetime.now().strftime("%d %b %H:%M"), "ts": time.time(),
                      "overall": result["overall"], "rubric": result["rubric"],
-                     "regions": len(result["regions"]),
+                     "regions": len(result["regions"]), "baseline": baseline,
+                     "baseline_label": result.get("baseline_label", "JFK, 1961 inaugural address"),
                      "flaw_counts": {k: sum(1 for r in result["regions"] if r["flaw_type"] == k) for k in FLAW_NAMES}})
     ATTEMPTS.parent.mkdir(parents=True, exist_ok=True)
     ATTEMPTS.write_text(json.dumps(attempts, indent=1), encoding="utf-8")
 
 
-def to_wav(uploaded):
+def to_wav(uploaded, prefix=""):
     import librosa
     import soundfile as sf
     UPLOADS.mkdir(parents=True, exist_ok=True)
     raw = UPLOADS / uploaded.name
     raw.write_bytes(uploaded.getvalue())
     y, _ = librosa.load(str(raw), sr=16000, mono=True)
-    out = UPLOADS / f"{Path(uploaded.name).stem}_{int(time.time())}.wav"
+    out = UPLOADS / f"{prefix}{Path(uploaded.name).stem}_{int(time.time())}.wav"
     sf.write(out, y, 16000)
     return out
 
 
-def run_analysis(path, transcript):
+def run_analysis(path, transcript, baseline="jfk"):
     with st.status("Analysing the speech...", expanded=True) as status:
-        result = analyze(path, transcript, progress=lambda name, frac: status.write(f"✓ {name}"))
+        result = analyze(path, transcript, baseline=baseline, progress=lambda name, frac: status.write(f"✓ {name}"))
         status.update(label="Analysis complete", state="complete", expanded=False)
     return result
 
@@ -188,6 +195,7 @@ def render_scores(result):
 
 def render_overlay(result):
     ov, regions = result["overlay"], result["regions"]
+    blabel = "Baseline (" + result.get("baseline_label", "JFK") .split(",")[0] + ")"
     t = np.array(ov["t"], dtype=float)
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.06,
                         subplot_titles=("Pitch (semitones vs. speaker's median)", "Loudness (dB vs. speaker's median)",
@@ -195,7 +203,7 @@ def render_overlay(result):
     for key, row in [("f0", 1), ("energy", 2), ("rate", 3)]:
         p = [np.nan if v is None else v for v in ov[f"{key}_participant"]]
         b = [np.nan if v is None else v for v in ov[f"{key}_baseline"]]
-        fig.add_trace(go.Scatter(x=t, y=b, name="Baseline (JFK)", line=dict(color=GREY, dash="dash", width=1.5),
+        fig.add_trace(go.Scatter(x=t, y=b, name=blabel, line=dict(color=GREY, dash="dash", width=1.5),
                                  showlegend=row == 1, legendgroup="b"), row=row, col=1)
         fig.add_trace(go.Scatter(x=t, y=p, name="Participant", line=dict(color=TEAL, width=2.2),
                                  showlegend=row == 1, legendgroup="p"), row=row, col=1)
@@ -250,7 +258,7 @@ def render_regions(result, audio_path, key):
                                                        "label": f"you, from {mmss(r['start'])}"}
                     st.rerun()
                 if st.button("▶ Play baseline", key=f"pb_{key}_{k}", width="stretch"):
-                    st.session_state[f"play_{key}"] = {"path": str(BASELINE_AUDIO), "start": max(0, r["baseline_start"] - 0.5),
+                    st.session_state[f"play_{key}"] = {"path": result.get("baseline_audio", str(BASELINE_AUDIO)), "start": max(0, r["baseline_start"] - 0.5),
                                                        "label": f"baseline (same words), from {mmss(r['baseline_start'])}"}
                     st.rerun()
     st.markdown("<div class='section-title'>Transcript with flaws highlighted</div>", unsafe_allow_html=True)
@@ -272,7 +280,7 @@ def render_regions(result, audio_path, key):
     st.markdown(f"<div class='glass transcript'>{' '.join(parts)}</div>", unsafe_allow_html=True)
 
 
-def render_spectrum(result, audio_path, key):
+def render_spectrum(result, audio_path, key, baseline="jfk"):
     regions = result["regions"]
     if not regions:
         st.info("No flaw regions to inspect.")
@@ -283,10 +291,11 @@ def render_spectrum(result, audio_path, key):
     r = regions[idx]
 
     @st.cache_data(show_spinner="Computing spectra...")
-    def spectra(path, s, e, bs, be):
-        return region_spectra(path, {"start": s, "end": e, "baseline_start": bs, "baseline_end": be})
+    def spectra(path, s, e, bs, be, bname):
+        return region_spectra(path, {"start": s, "end": e, "baseline_start": bs, "baseline_end": be}, baseline)
 
-    sp = spectra(audio_path, r["start"], r["end"], r["baseline_start"], r["baseline_end"])
+    sp = spectra(audio_path, r["start"], r["end"], r["baseline_start"], r["baseline_end"],
+                 baseline if isinstance(baseline, str) else baseline["name"])
     f = go.Figure()
     f.add_trace(go.Scatter(x=sp["fft_baseline"]["freq"], y=sp["fft_baseline"]["db"], name="Baseline (same words)",
                            line=dict(color=GREY, dash="dash")))
@@ -303,7 +312,7 @@ def render_spectrum(result, audio_path, key):
             st.plotly_chart(hm, width="stretch")
 
 
-def render_analysis(result, audio_path, key):
+def render_analysis(result, audio_path, key, baseline="jfk"):
     render_scores(result)
     st.write("")
     t1, t2, t3 = st.tabs(["📈  Overlay vs baseline", "🧭  Flaw regions", "🔬  Spectrum"])
@@ -312,7 +321,7 @@ def render_analysis(result, audio_path, key):
     with t2:
         render_regions(result, audio_path, key)
     with t3:
-        render_spectrum(result, audio_path, key)
+        render_spectrum(result, audio_path, key, baseline)
 
 
 def render_dataset_eval():
@@ -440,25 +449,48 @@ def participant_page(user):
                 else:
                     f = st.selectbox("Sample", list(DEMO_SPEAKERS), format_func=lambda x: Path(x).stem)
                     chosen = ROOT / f
-                st.markdown("<span class='muted'>Baseline: JFK, 1961 inaugural address</span>", unsafe_allow_html=True)
                 if st.button("Analyse my delivery", type="primary", width="stretch", disabled=chosen is None):
-                    path = chosen if isinstance(chosen, Path) else to_wav(chosen)
-                    result = run_analysis(path, st.session_state.get("transcript", DEFAULT_TRANSCRIPT))
-                    save_attempt(user["name"], result, path)
-                    st.session_state.p_result, st.session_state.p_audio = result, str(path)
-                    st.success(f"Done! Overall score **{result['overall']}/100**. Open **My analysis** to see the details.")
+                    baseline = "jfk"
+                    text = st.session_state.get("transcript", "") or ""
+                    ok = True
+                    if st.session_state.get("bmode", "JFK").startswith("My own"):
+                        if st.session_state.get("base_upload") is None or not text.strip():
+                            st.error("Upload the ideal recording and paste its script to use your own baseline.")
+                            ok = False
+                        else:
+                            bpath = to_wav(st.session_state.base_upload, prefix="baseline_")
+                            baseline = custom_baseline(bpath, text, st.session_state.get("base_label") or "Custom baseline")
+                    if ok:
+                        path = chosen if isinstance(chosen, Path) else to_wav(chosen)
+                        result = run_analysis(path, text or DEFAULT_TRANSCRIPT, baseline)
+                        save_attempt(user["name"], result, path, baseline)
+                        st.session_state.p_result, st.session_state.p_audio = result, str(path)
+                        st.session_state.p_baseline = baseline
+                        st.success(f"Done! Overall score **{result['overall']}/100**. Open **My analysis** to see the details.")
         with c2:
             with st.container(border=True):
-                st.markdown("<div class='section-title'>2 · Text to deliver</div>", unsafe_allow_html=True)
-                st.session_state.transcript = st.text_area("Transcript", DEFAULT_TRANSCRIPT, height=230,
-                                                           label_visibility="collapsed")
-                st.caption("Deliver this exact text. You're compared word by word with JFK's delivery of it.")
+                st.markdown("<div class='section-title'>2 · Baseline & text</div>", unsafe_allow_html=True)
+                bopts = ["JFK · 1961 inaugural (default)"] + (["My own ideal recording"] if custom_baseline else [])
+                bmode = st.radio("Baseline", bopts, horizontal=True, key="bmode")
+                if bmode.startswith("JFK"):
+                    st.session_state.transcript = st.text_area("Text to deliver", DEFAULT_TRANSCRIPT, height=200)
+                    st.caption("Deliver this exact text. You're compared word by word with JFK's delivery of it.")
+                    st.session_state.base_upload = None
+                else:
+                    st.session_state.base_label = st.text_input("Who is the baseline speaker?", "Coach")
+                    st.session_state.base_upload = st.file_uploader(
+                        "Ideal delivery of your script (coach / champion / your best take)", type=["wav", "mp3", "m4a"],
+                        key="base_up")
+                    st.session_state.transcript = st.text_area("Your script (exact words of the ideal recording)", "",
+                                                               height=160, placeholder="Paste the script here...")
+                    st.caption("Any script works: the ideal recording becomes the baseline and you're compared word by word with it.")
     with tab_res:
         res = st.session_state.get("p_result")
         if not res:
             st.info("Make an attempt in **New attempt** to see your analysis here.")
         else:
-            render_analysis(res, st.session_state.p_audio, "p")
+            st.caption(f"Compared with baseline: {res.get('baseline_label', 'JFK, 1961 inaugural address')}")
+            render_analysis(res, st.session_state.p_audio, "p", st.session_state.get("p_baseline", "jfk"))
     with tab_prog:
         mine = [a for a in load_attempts() if a["participant"].lower() == user["name"].lower()]
         if not mine:
@@ -562,8 +594,10 @@ def judge_page(user):
             a = latest[who]
             path = Path(a["audio_path"])
             if path.exists():
+                b = a.get("baseline", "jfk")
                 st.audio(str(path))
-                render_analysis(analyze(path), str(path), "j")
+                st.caption(f"Baseline: {a.get('baseline_label', 'JFK, 1961 inaugural address')}")
+                render_analysis(analyze(path, None, baseline=b), str(path), "j", b)
             else:
                 st.warning("The audio for this attempt is no longer available.")
     with tab_data:
