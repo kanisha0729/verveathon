@@ -1,0 +1,14 @@
+# CPU-only PyTorch wheels
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.1+cpu
+
+faster-whisper==1.2.1
+librosa==1.0.0
+soundfile==0.14.0
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.0.6
+plotly==7.1.0
+streamlit==1.65.0
+python-dotenv==1.2.4
+yt-dlp==2026.8.19
