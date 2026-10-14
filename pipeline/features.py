@@ -70,6 +70,36 @@ def _nanmean(x, default=np.nan):
     return float(np.mean(x)) if len(x) else default
 
 
+SILENCE_DB = -25.0   # frames this far below the speaker's median loudness count as silence
+
+
+def _silence_before(frames, words, i):
+    """Longest silent stretch between the middle of word i-1 and the middle of word i.
+    Whisper often stretches word boundaries into silences, so we measure the pause from the
+    audio energy itself. Returns (length_s, start_s, end_s)."""
+    if i == 0:
+        return 0.0, words[0]["start"], words[0]["start"]
+    a = (words[i - 1]["start"] + words[i - 1]["end"]) / 2
+    b = (words[i]["start"] + words[i]["end"]) / 2
+    t = frames["t"]
+    idx = np.where((t >= a) & (t < b))[0]
+    gap = max(0.0, words[i]["start"] - words[i - 1]["end"])
+    best = (gap, words[i - 1]["end"], words[i]["start"])
+    if len(idx) == 0:
+        return best
+    silent = frames["energy_rel"][idx] < SILENCE_DB
+    run_start = None
+    for k, s in enumerate(list(silent) + [False]):
+        if s and run_start is None:
+            run_start = k
+        elif not s and run_start is not None:
+            length = (k - run_start) * HOP_S
+            if length > best[0]:
+                best = (length, float(t[idx[run_start]]), float(t[idx[run_start]]) + length)
+            run_start = None
+    return best
+
+
 def word_features(frames, words):
     """One dict per word with the features compared against the baseline."""
     out = []
@@ -85,10 +115,12 @@ def word_features(frames, words):
         win_f0 = win_f0[~np.isnan(win_f0)]
         f0_range = float(np.percentile(win_f0, 90) - np.percentile(win_f0, 10)) if len(win_f0) >= 3 else 0.0
 
-        pause = w["start"] - words[i - 1]["end"] if i > 0 else 0.0
+        pause, pause_start, pause_end = _silence_before(frames, words, i)
         out.append({
             "duration": w["end"] - w["start"],
-            "pause_before": max(0.0, pause),
+            "pause_before": pause,
+            "pause_start": pause_start,
+            "pause_end": pause_end,
             "local_rate": local_rate,
             "f0_mean": _nanmean(frames["f0_st"][idx], 0.0),
             "f0_range": f0_range,

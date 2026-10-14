@@ -9,8 +9,11 @@ Rubric scores are fixed formulas on the z-scores, so results are fully reproduci
 """
 import numpy as np
 
-Z_THRESHOLD = 2.0
+Z_THRESHOLD = 1.8
 Z_CLIP = 5.0          # cap extreme z so one outlier can't wreck a score
+SMOOTH_WORDS = 3      # z is averaged over 3 neighbouring words before flagging (reduces one-word noise)
+MERGE_GAP = 3         # flagged words at most this many words apart join into one region
+MIN_WORDS = 2         # regions shorter than this are ignored (except pauses, which are single events)
 
 # feature -> list of (flaw type, direction). direction +1 = too high is a flaw, -1 = too low is a flaw
 FLAW_RULES = {
@@ -72,33 +75,48 @@ def _explain(ftype, start, end, words_text, first_word, p, b, z):
     return span
 
 
+def _smooth(x, k=SMOOTH_WORDS):
+    if len(x) < k:
+        return x
+    pad = k // 2
+    xp = np.pad(x, pad, mode="edge")
+    return np.convolve(xp, np.ones(k) / k, mode="valid")
+
+
 def find_regions(p_words, b_words, p_feats, b_feats, z):
     n = min(len(p_words), len(b_words))
     regions = []
     for feat, rules in FLAW_RULES.items():
+        zf = z[feat][:n] if feat == "pause_before" else _smooth(z[feat][:n])
         for ftype, direction in rules:
-            flagged = [i for i in range(n) if direction * z[feat][i] > Z_THRESHOLD]
+            flagged = [i for i in range(n) if direction * zf[i] > Z_THRESHOLD]
             if feat == "pause_before":
                 flagged = [i for i in flagged if i > 0]
-            # merge neighbours (gap of 1 word or less)
             groups = []
+            gap = 1 if ftype == "long_pause" else MERGE_GAP
             for i in flagged:
-                if groups and i - groups[-1][-1] <= 2:
+                if groups and i - groups[-1][-1] <= gap:
                     groups[-1].append(i)
                 else:
                     groups.append([i])
             for g in groups:
                 i0, i1 = g[0], g[-1]
+                if ftype != "long_pause" and (i1 - i0 + 1) < MIN_WORDS:
+                    continue
+                g = list(range(i0, i1 + 1)) if ftype != "long_pause" else g
                 if ftype == "long_pause":
-                    # the flaw IS the silence: from the end of the previous word to the flagged word
-                    start, end = p_words[i0 - 1]["end"], p_words[i1]["start"]
-                    b_start, b_end = b_words[i0 - 1]["end"], b_words[i1]["start"]
+                    # the flaw IS the silence itself (measured from the audio energy)
+                    start, end = p_feats[i0]["pause_start"], p_feats[i1]["pause_end"]
+                    b_start, b_end = b_words[i0 - 1]["end"], max(b_words[i1]["start"], b_words[i0 - 1]["end"] + 0.1)
                 else:
                     start, end = p_words[i0]["start"], p_words[i1]["end"]
                     b_start, b_end = b_words[i0]["start"], b_words[i1]["end"]
-                pv = float(np.mean([p_feats[i][feat] for i in g]))
+                agg = np.max if ftype == "long_pause" else np.mean   # a pause can be split across 2 words
+                pv = float(agg([p_feats[i][feat] for i in g]))
                 bv = float(np.mean([b_feats[i][feat] for i in g]))
-                zv = float(np.mean([z[feat][i] for i in g]))
+                zv = float(agg([z[feat][i] for i in g]))
+                if ftype == "long_pause":
+                    pv = max(pv, float(end - start))     # total silence of the merged region
                 ws = [p_words[i]["word"] for i in range(i0, i1 + 1)]
                 text = " ".join(ws[:5]) + ("..." if len(ws) > 5 else "")
                 regions.append({
@@ -109,7 +127,7 @@ def find_regions(p_words, b_words, p_feats, b_feats, z):
                     "flaw_type": ftype,
                     "severity": round(float(np.mean([abs(z[feat][i]) for i in g])), 2),
                     "metrics": {"feature": feat, "participant": round(pv, 3), "baseline": round(bv, 3), "z": round(zv, 2)},
-                    "explanation": _explain(ftype, start, end, text, ws[0], pv, bv, zv),
+                    "explanation": _explain(ftype, start, end, text, ws[-1] if ftype == "long_pause" else ws[0], pv, bv, zv),
                 })
     regions.sort(key=lambda r: r["start"])
     return regions

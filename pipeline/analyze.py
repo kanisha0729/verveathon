@@ -22,6 +22,7 @@ from pipeline.compare import zscores, find_regions, rubric_scores, overlay  # no
 BASELINES = {"jfk": {"audio": ROOT / "data/baseline/jfk_baseline.wav",
                      "transcript": ROOT / "data/transcripts/jfk.txt"}}
 RESULTS = ROOT / "results"
+PIPELINE_VERSION = 2   # bump when features/compare change, so old cached results are ignored
 
 
 def _keep_real_words(words):
@@ -38,7 +39,7 @@ def _process(audio_path, transcript_text):
 def load_baseline(name="jfk", progress=None):
     cfg = BASELINES[name]
     RESULTS.mkdir(exist_ok=True)
-    cache = RESULTS / f"_baseline_{name}.pkl"
+    cache = RESULTS / f"_baseline_{name}_v{PIPELINE_VERSION}.pkl"
     audio = cfg["audio"]
     if cache.exists() and cache.stat().st_mtime > audio.stat().st_mtime:
         with open(cache, "rb") as f:
@@ -58,7 +59,9 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
     RESULTS.mkdir(exist_ok=True)
     out_file = RESULTS / f"{audio_path.stem}.json"
     if use_cache and out_file.exists() and out_file.stat().st_mtime > audio_path.stat().st_mtime:
-        return json.loads(out_file.read_text(encoding="utf-8"))
+        cached = json.loads(out_file.read_text(encoding="utf-8"))
+        if cached.get("pipeline_version") == PIPELINE_VERSION:
+            return cached
 
     if not transcript_text or not transcript_text.strip():
         transcript_text = BASELINES[baseline]["transcript"].read_text(encoding="utf-8")
@@ -89,6 +92,7 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
         "rubric": rubric,
         "overall": overall,
         "matched_words": int(sum(1 for w in p_words if w["conf"] > 0)),
+        "pipeline_version": PIPELINE_VERSION,
     }
     out_file.write_text(json.dumps(result, indent=1), encoding="utf-8")
     step("Done", 1.0)
