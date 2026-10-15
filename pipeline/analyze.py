@@ -26,6 +26,41 @@ RESULTS = ROOT / "results"
 PIPELINE_VERSION = 3   # bump when features/compare change, so old cached results are ignored
 
 
+MIN_SPEECH_S = 2.0      # less audible speech than this -> the microphone captured (almost) nothing
+MIN_COVERAGE = 0.25     # fewer script words recognised than this -> wrong text or unusable recording
+SPEECH_DBFS = -50.0     # 20 ms frames louder than this (absolute dBFS) count as audible sound
+
+
+class NoSpeechError(ValueError):
+    """Raised (in strict mode) when a recording can't be scored fairly."""
+
+
+def audio_check(audio):
+    """Cheap sanity check of a recording BEFORE scoring. `audio` = path or raw bytes.
+    Returns peak level, seconds of audible sound and a verdict. Pure digital silence (all zeros)
+    is what Windows / the browser deliver when the microphone is blocked or muted."""
+    import io
+    import numpy as np
+    import librosa
+    src = io.BytesIO(audio) if isinstance(audio, (bytes, bytearray)) else str(audio)
+    y, sr = librosa.load(src, sr=16000, mono=True)
+    dur = len(y) / 16000
+    peak = float(np.max(np.abs(y))) if len(y) else 0.0
+    rms = librosa.feature.rms(y=y, frame_length=1024, hop_length=320)[0] if len(y) else np.zeros(1)
+    loud_s = float(np.sum(20 * np.log10(rms + 1e-10) > SPEECH_DBFS) * 0.02)
+    peak_db = 20 * np.log10(peak + 1e-10)
+    if peak < 1e-4:
+        verdict, msg = "silent", ("The recording is completely silent: the microphone sent no sound. "
+                                  "Check the browser's microphone permission and the selected input device.")
+    elif loud_s < MIN_SPEECH_S:
+        verdict, msg = "too_quiet", (f"Only {loud_s:.1f} s of audible sound (peak {peak_db:.0f} dBFS). "
+                                     "Speak closer to the microphone or raise the input volume.")
+    else:
+        verdict, msg = "ok", f"{loud_s:.1f} s of audible sound detected (peak {peak_db:.0f} dBFS)."
+    return {"verdict": verdict, "message": msg, "peak_db": round(float(peak_db), 1),
+            "speech_s": round(loud_s, 1), "duration": round(dur, 1)}
+
+
 def _keep_real_words(words):
     return [w for w in words if norm(w["word"])]
 
@@ -68,9 +103,23 @@ def load_baseline(baseline="jfk", progress=None):
     return data
 
 
-def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use_cache=True):
-    """progress(step_name, fraction) is called after each stage if given (for the UI)."""
+def _check_coverage(result, strict):
+    if strict and result.get("coverage", 1.0) < MIN_COVERAGE:
+        raise NoSpeechError(
+            f"Only {result.get('matched_words', 0)} of {len(result.get('words', []))} script words were recognised "
+            f"({result.get('coverage', 0):.0%}). Read the exact text shown in the transcript box, clearly and "
+            f"from the beginning, then try again.")
+
+
+def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use_cache=True, strict=False):
+    """progress(step_name, fraction) is called after each stage if given (for the UI).
+    strict=True (used for live participant attempts) refuses to score silent / unrecognisable recordings
+    instead of returning a meaningless 0, by raising NoSpeechError with a human-readable reason."""
     audio_path = Path(audio_path)
+    if strict:
+        chk = audio_check(audio_path)
+        if chk["verdict"] != "ok":
+            raise NoSpeechError(chk["message"])
     cfg = baseline_config(baseline)
     RESULTS.mkdir(exist_ok=True)
     suffix = "" if cfg["name"] == "jfk" else f"__{cfg['name']}"
@@ -79,6 +128,7 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
     if use_cache and out_file.exists() and out_file.stat().st_mtime > audio_path.stat().st_mtime:
         cached = json.loads(out_file.read_text(encoding="utf-8"))
         if cached.get("pipeline_version") == PIPELINE_VERSION:
+            _check_coverage(cached, strict)
             return cached
 
     if not transcript_text or not transcript_text.strip():
@@ -120,6 +170,7 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
         "pipeline_version": PIPELINE_VERSION,
     }
     out_file.write_text(json.dumps(result, indent=1), encoding="utf-8")
+    _check_coverage(result, strict)
     step("Done", 1.0)
     return result
 

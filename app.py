@@ -19,6 +19,20 @@ try:   # newer pipeline/analyze.py supports custom baselines; older versions sti
     from pipeline.analyze import custom_baseline
 except ImportError:
     custom_baseline = None
+try:   # recording sanity check (silent mic / wrong script) - newer pipeline only
+    from pipeline.analyze import audio_check, NoSpeechError
+except ImportError:
+    audio_check = None
+
+    class NoSpeechError(ValueError):
+        pass
+
+MIC_HELP = """**How to fix the microphone (Windows + Chrome):**
+1. Click the 🔒 / ⓘ icon left of `localhost:8501` in the address bar → **Microphone → Allow** → reload the page.
+2. Windows **Settings → Privacy & security → Microphone** → turn on *Microphone access* and *Let desktop apps access your microphone*.
+3. Windows **Settings → System → Sound → Input** → choose the right microphone and check the blue level bar moves when you talk.
+4. Chrome: open `chrome://settings/content/microphone` and pick the same microphone in the drop-down.
+5. Record again and **press ▶ on the recording to hear yourself before clicking Analyse.**"""
 
 ROOT = Path(__file__).resolve().parent
 LABELS = ROOT / "data/labels.csv"
@@ -163,7 +177,13 @@ def to_wav(uploaded, prefix=""):
 
 def run_analysis(path, transcript, baseline="jfk"):
     with st.status("Analysing the speech...", expanded=True) as status:
-        result = analyze(path, transcript, baseline=baseline, progress=lambda name, frac: status.write(f"✓ {name}"))
+        kw = {"strict": True} if audio_check is not None else {}
+        try:
+            result = analyze(path, transcript, baseline=baseline,
+                             progress=lambda name, frac: status.write(f"✓ {name}"), **kw)
+        except NoSpeechError:
+            status.update(label="Recording could not be scored", state="error", expanded=False)
+            raise
         status.update(label="Analysis complete", state="complete", expanded=False)
     return result
 
@@ -464,6 +484,17 @@ def participant_page(user):
                     if rec is not None:
                         rec.name = "recording.wav"
                         chosen = rec
+                        if audio_check is not None:
+                            try:
+                                chk = audio_check(rec.getvalue())
+                            except Exception:
+                                chk = None
+                            if chk and chk["verdict"] == "ok":
+                                st.success(f"🎚️ Mic check passed: {chk['message']}")
+                            elif chk:
+                                st.error(f"🎚️ Mic check failed: {chk['message']}")
+                                with st.expander("How to fix it", expanded=chk["verdict"] == "silent"):
+                                    st.markdown(MIC_HELP)
                 elif mode == "Upload a file":
                     chosen = st.file_uploader("Upload your recording", type=["wav", "mp3", "m4a"])
                 else:
@@ -482,11 +513,18 @@ def participant_page(user):
                             baseline = custom_baseline(bpath, text, st.session_state.get("base_label") or "Custom baseline")
                     if ok:
                         path = chosen if isinstance(chosen, Path) else to_wav(chosen)
-                        result = run_analysis(path, text or DEFAULT_TRANSCRIPT, baseline)
-                        save_attempt(user["name"], result, path, baseline)
-                        st.session_state.p_result, st.session_state.p_audio = result, str(path)
-                        st.session_state.p_baseline = baseline
-                        st.success(f"Done! Overall score **{result['overall']}/100**. Open **My analysis** to see the details.")
+                        try:
+                            result = run_analysis(path, text or DEFAULT_TRANSCRIPT, baseline)
+                        except NoSpeechError as e:
+                            st.error(f"**Not scored.** {e}")
+                            st.markdown(MIC_HELP)
+                            result = None
+                        if result is not None:
+                            save_attempt(user["name"], result, path, baseline)
+                            st.session_state.p_result, st.session_state.p_audio = result, str(path)
+                            st.session_state.p_baseline = baseline
+                            st.success(f"Done! Overall score **{result['overall']}/100**. "
+                                       f"Open **My analysis** to see the details.")
         with c2:
             with st.container(border=True):
                 st.markdown("<div class='section-title'>2 · Baseline & text</div>", unsafe_allow_html=True)
