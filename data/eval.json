@@ -1,10 +1,10 @@
 {
  "score_by_severity": {
   "0": 100.0,
-  "1": 94.0,
-  "2": 93.6,
-  "3": 92.4,
-  "4": 86.4
+  "1": 94.2,
+  "2": 91.6,
+  "3": 86.6,
+  "4": 69.9
  },
  "per_flaw_type": {
   "long_pause": {
@@ -29,13 +29,13 @@
    "labels": 12,
    "recall": 0.17,
    "precision": 0.15,
-   "mean_iou": 0.14
+   "mean_iou": 0.13
   },
   "unclear": {
    "labels": 10,
-   "recall": 0.3,
-   "precision": 0.27,
-   "mean_iou": 0.24
+   "recall": 0.4,
+   "precision": 0.33,
+   "mean_iou": 0.26
   }
  },
  "files": [
@@ -58,7 +58,7 @@
   {
    "file": "data/flawed/synthetic/syn_rushed_s2.wav",
    "severity": 2,
-   "overall": 95,
+   "overall": 93,
    "regions": 3,
    "label_ious": [
     0.0
@@ -67,7 +67,7 @@
   {
    "file": "data/flawed/synthetic/syn_rushed_s3.wav",
    "severity": 3,
-   "overall": 93,
+   "overall": 86,
    "regions": 4,
    "label_ious": [
     0.24
@@ -76,7 +76,7 @@
   {
    "file": "data/flawed/synthetic/syn_rushed_s4.wav",
    "severity": 4,
-   "overall": 89,
+   "overall": 74,
    "regions": 3,
    "label_ious": [
     0.47
@@ -103,7 +103,7 @@
   {
    "file": "data/flawed/synthetic/syn_long_pause_s3.wav",
    "severity": 3,
-   "overall": 96,
+   "overall": 93,
    "regions": 5,
    "label_ious": [
     0.98
@@ -112,7 +112,7 @@
   {
    "file": "data/flawed/synthetic/syn_long_pause_s4.wav",
    "severity": 4,
-   "overall": 97,
+   "overall": 96,
    "regions": 4,
    "label_ious": [
     0.94
@@ -121,7 +121,7 @@
   {
    "file": "data/flawed/synthetic/syn_low_volume_s1.wav",
    "severity": 1,
-   "overall": 97,
+   "overall": 98,
    "regions": 1,
    "label_ious": [
     0.0
@@ -139,7 +139,7 @@
   {
    "file": "data/flawed/synthetic/syn_low_volume_s3.wav",
    "severity": 3,
-   "overall": 96,
+   "overall": 95,
    "regions": 1,
    "label_ious": [
     0.72
@@ -148,7 +148,7 @@
   {
    "file": "data/flawed/synthetic/syn_low_volume_s4.wav",
    "severity": 4,
-   "overall": 94,
+   "overall": 93,
    "regions": 2,
    "label_ious": [
     0.85
@@ -166,16 +166,16 @@
   {
    "file": "data/flawed/synthetic/syn_unclear_s2.wav",
    "severity": 2,
-   "overall": 98,
+   "overall": 97,
    "regions": 2,
    "label_ious": [
-    0.12
+    0.18
    ]
   },
   {
    "file": "data/flawed/synthetic/syn_unclear_s3.wav",
    "severity": 3,
-   "overall": 96,
+   "overall": 93,
    "regions": 3,
    "label_ious": [
     0.58
@@ -184,27 +184,27 @@
   {
    "file": "data/flawed/synthetic/syn_unclear_s4.wav",
    "severity": 4,
-   "overall": 93,
-   "regions": 4,
+   "overall": 89,
+   "regions": 3,
    "label_ious": [
-    0.59
+    0.63
    ]
   },
   {
    "file": "data/flawed/synthetic/syn_mixed_a_s4.wav",
    "severity": 4,
-   "overall": 77,
+   "overall": 35,
    "regions": 11,
    "label_ious": [
     0.96,
     0.98,
-    0.1
+    0.07
    ]
   },
   {
    "file": "data/flawed/synthetic/syn_mixed_b_s4.wav",
    "severity": 4,
-   "overall": 76,
+   "overall": 32,
    "regions": 12,
    "label_ious": [
     0.0,
@@ -216,13 +216,13 @@
    "file": "data/flawed/human/flaw_L1_near_perfect.wav",
    "severity": 1,
    "overall": 80,
-   "regions": 5,
+   "regions": 6,
    "label_ious": []
   },
   {
    "file": "data/flawed/human/flaw_L2_mild.wav",
    "severity": 2,
-   "overall": 81,
+   "overall": 74,
    "regions": 6,
    "label_ious": [
     0.22
@@ -231,24 +231,24 @@
   {
    "file": "data/flawed/human/flaw_L3_moderate.wav",
    "severity": 3,
-   "overall": 81,
-   "regions": 14,
+   "overall": 66,
+   "regions": 13,
    "label_ious": [
     0.55,
     0.02,
     0.0,
     0.02,
     0.08,
-    0.2
+    0.21
    ]
   },
   {
    "file": "data/flawed/human/flaw_L4_egregious.wav",
    "severity": 4,
-   "overall": 79,
+   "overall": 70,
    "regions": 11,
    "label_ious": [
-    0.43,
+    0.35,
     0.0,
     0.1,
     0.09,
@@ -258,10 +258,10 @@
     0.0,
     0.0,
     0.0,
-    0.25,
+    0.32,
     0.0,
     0.22,
-    0.2,
+    0.23,
     0.0
    ]
   }

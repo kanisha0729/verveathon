@@ -133,13 +133,48 @@ def find_regions(p_words, b_words, p_feats, b_feats, z):
     return regions
 
 
-def rubric_scores(z):
+def rubric_scores(z, regions=None, coverage=1.0):
+    """Score each criterion 0-10 from (a) the average deviation over ALL words and (b) the share of the
+    speech that is inside a detected flaw region of that criterion, so localised flaws are not averaged away.
+    coverage = share of the script that was actually recognised in the recording."""
+    regions = regions or []
+    n = len(next(iter(z.values()))) if z else 0
     scores = {}
     for crit, feat in RUBRIC.items():
-        mean_abs = float(np.mean(np.abs(z[feat]))) if len(z[feat]) else 0.0
-        scores[crit] = round(max(0.0, 10.0 - 2.0 * mean_abs), 1)
-    overall = int(round(sum(scores.values()) * 2))
-    return scores, overall
+        mean_abs = float(np.mean(np.abs(z[feat]))) if n else 0.0
+        types = {t for t, _ in FLAW_RULES[feat]}
+        flagged = set()
+        for r in regions:
+            if r["flaw_type"] in types:
+                flagged.update(range(r["i0"], r["i1"] + 1))
+        frac = len(flagged) / max(n, 1)
+        s = 10.0 - 1.5 * mean_abs - 15.0 * frac
+        if crit == "clarity":
+            s -= 10.0 * max(0.0, 1.0 - coverage)      # words that were never clearly said
+        scores[crit] = round(float(np.clip(s, 0.0, 10.0)), 1)
+    overall = sum(scores.values()) * 2
+    if coverage < 0.85:                                # most of the script was not delivered
+        overall *= coverage / 0.85
+    return scores, int(round(overall))
+
+
+def delivery_profile(words, frames, feats):
+    """Whole-speech summary numbers: they differ from speaker to speaker and are shown next to the baseline."""
+    if not words:
+        return {}
+    dur = max(words[-1]["end"] - words[0]["start"], 0.5)
+    pauses = [f["pause_before"] for f in feats[1:]]
+    f0 = frames["f0_st"][~np.isnan(frames["f0_st"])]
+    speech = frames["energy_rel"][frames["energy_rel"] > -30]
+    return {
+        "wpm": round(len(words) / dur * 60, 1),
+        "pauses": int(sum(1 for p in pauses if p > 0.3)),
+        "pause_time": round(float(sum(p for p in pauses if p > 0.3)), 1),
+        "pitch_range": round(float(np.percentile(f0, 90) - np.percentile(f0, 10)), 1) if len(f0) > 10 else 0.0,
+        "loudness_dynamics": round(float(np.std(speech)), 1) if len(speech) > 10 else 0.0,
+        "clarity": round(float(np.mean([w["conf"] for w in words])), 2),
+        "duration": round(float(dur), 1),
+    }
 
 
 def _knots(words):

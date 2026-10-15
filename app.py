@@ -191,6 +191,26 @@ def render_scores(result):
     for i, (k, name) in enumerate(RUBRIC.items()):
         with cols[i + 1]:
             st.markdown(kpi(name, result["rubric"][k], 10), unsafe_allow_html=True)
+    cov = result.get("coverage", 1.0)
+    if cov < 0.85:
+        st.warning(f"Only {cov:.0%} of the script was clearly recognised in this recording. Read the full text "
+                   f"shown in the transcript box. Missing or unclear words lower the Clarity and Overall scores.")
+    prof = result.get("profile")
+    if prof and prof.get("participant"):
+        p, b = prof["participant"], prof.get("baseline", {})
+        st.markdown("<div class='section-title' style='margin-top:14px'>Your delivery profile vs baseline</div>",
+                    unsafe_allow_html=True)
+        items = [("Speaking pace", "wpm", "words/min", 0), ("Pauses > 0.3 s", "pauses", "pauses", 0),
+                 ("Pitch range", "pitch_range", "semitones", 1), ("Loudness dynamics", "loudness_dynamics", "dB", 1),
+                 ("Clarity", "clarity", "confidence", 2), ("Duration", "duration", "seconds", 1)]
+        pc = st.columns(len(items))
+        for col, (label, key, unit, nd) in zip(pc, items):
+            pv, bv = p.get(key, 0), b.get(key, 0)
+            diff = (pv - bv) / bv * 100 if bv else 0
+            col.markdown(f"<div class='glass kpi'><div class='label'>{label}</div>"
+                         f"<div class='value' style='font-size:1.6rem'>{pv:.{nd}f}</div>"
+                         f"<div class='sub'>{unit} · baseline {bv:.{nd}f} ({diff:+.0f}%)</div></div>",
+                         unsafe_allow_html=True)
 
 
 def render_overlay(result):
@@ -369,7 +389,7 @@ def render_how():
              ("📊", "Acoustic features", "Every 20 ms: F0 pitch (pYIN), RMS energy, spectral centroid & flatness, 13 MFCCs, FFT. Per word: rate, pause (from silence), pitch range, loudness, clarity."),
              ("⚖️", "Word-by-word comparison", "Word i of the participant vs word i of the baseline: z = (participant − baseline) / spread of the baseline."),
              ("⏱️", "Temporal grounding", "Words with |z| > 1.8 (smoothed over 3 words) merge into flaw regions with exact start/end times."),
-             ("🧾", "Explanations + rubric", "Every region gets a numeric cause. Rubric per criterion = max(0, 10 − 2·mean|z|). Same audio → same score.")]
+             ("🧾", "Explanations + rubric", "Every region gets a numeric cause. Rubric per criterion = 10 − 1.5·mean|z| − 15·(share of speech inside flaw regions). Same audio → same score.")]
     cols = st.columns(3)
     for i, (ico, title, body) in enumerate(steps):
         with cols[i % 3]:

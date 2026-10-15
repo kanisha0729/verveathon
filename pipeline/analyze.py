@@ -18,12 +18,12 @@ if str(ROOT) not in sys.path:
 
 from pipeline.align import align, norm                                      # noqa: E402
 from pipeline.features import frame_features, word_features, fft_spectrum, mfcc_region  # noqa: E402
-from pipeline.compare import zscores, find_regions, rubric_scores, overlay  # noqa: E402
+from pipeline.compare import zscores, find_regions, rubric_scores, overlay, delivery_profile  # noqa: E402
 
 BASELINES = {"jfk": {"audio": ROOT / "data/baseline/jfk_baseline.wav",
                      "transcript": ROOT / "data/transcripts/jfk.txt"}}
 RESULTS = ROOT / "results"
-PIPELINE_VERSION = 2   # bump when features/compare change, so old cached results are ignored
+PIPELINE_VERSION = 3   # bump when features/compare change, so old cached results are ignored
 
 
 def _keep_real_words(words):
@@ -74,7 +74,8 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
     cfg = baseline_config(baseline)
     RESULTS.mkdir(exist_ok=True)
     suffix = "" if cfg["name"] == "jfk" else f"__{cfg['name']}"
-    out_file = RESULTS / f"{audio_path.stem}{suffix}.json"
+    digest = hashlib.md5(audio_path.read_bytes()).hexdigest()[:8]   # different audio -> different cache entry
+    out_file = RESULTS / f"{audio_path.stem}_{digest}{suffix}.json"
     if use_cache and out_file.exists() and out_file.stat().st_mtime > audio_path.stat().st_mtime:
         cached = json.loads(out_file.read_text(encoding="utf-8"))
         if cached.get("pipeline_version") == PIPELINE_VERSION:
@@ -97,7 +98,9 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
     z = zscores(p_feats, b_feats)
     regions = find_regions(p_words, b_words, p_feats, b_feats, z)
     step("Scoring", 0.9)
-    rubric, overall = rubric_scores(z)
+    matched = sum(1 for w in p_words if w["conf"] > 0)
+    coverage = matched / max(len(p_words), 1)
+    rubric, overall = rubric_scores(z, regions, coverage)
 
     result = {
         "file": audio_path.name,
@@ -110,7 +113,10 @@ def analyze(audio_path, transcript_text=None, baseline="jfk", progress=None, use
         "regions": regions,
         "rubric": rubric,
         "overall": overall,
-        "matched_words": int(sum(1 for w in p_words if w["conf"] > 0)),
+        "matched_words": int(matched),
+        "coverage": round(float(coverage), 3),
+        "profile": {"participant": delivery_profile(p_words, p_frames, p_feats),
+                    "baseline": delivery_profile(b_words, b_frames, b_feats)},
         "pipeline_version": PIPELINE_VERSION,
     }
     out_file.write_text(json.dumps(result, indent=1), encoding="utf-8")

@@ -40,10 +40,10 @@ The mean overall score decreases monotonically as flaw severity increases:
 | Severity Level | Description | Mean Overall Score (0–100) |
 |:---:|---|:---:|
 | **0** | Baseline / Ideal Delivery | **100.0** |
-| **1** | Level 1 (Near-perfect / Minor flaws) | **94.0** |
-| **2** | Level 2 (Mild flaws) | **93.6** |
-| **3** | Level 3 (Moderate flaws) | **92.4** |
-| **4** | Level 4 (Egregious flaws) | **86.4** |
+| **1** | Level 1 (Near-perfect / Minor flaws) | **94.2** |
+| **2** | Level 2 (Mild flaws) | **91.6** |
+| **3** | Level 3 (Moderate flaws) | **86.6** |
+| **4** | Level 4 (Egregious flaws) | **69.9** |
 
 ### Per-Flaw-Type Detection Performance
 Evaluated against labeled ground-truth flaw regions in `data/labels.csv` (Hit criterion: IoU $\ge$ 0.30):
@@ -53,8 +53,8 @@ Evaluated against labeled ground-truth flaw regions in `data/labels.csv` (Hit cr
 | **Long Pause** (`long_pause`) | 7 | 0.71 | 0.45 | 0.66 |
 | **Low Volume** (`low_volume`) | 10 | 0.30 | 0.43 | 0.26 |
 | **Monotone** (`monotone`) | 5 | 0.20 | 0.33 | 0.13 |
-| **Rushed** (`rushed`) | 12 | 0.17 | 0.15 | 0.14 |
-| **Unclear** (`unclear`) | 10 | 0.30 | 0.27 | 0.24 |
+| **Rushed** (`rushed`) | 12 | 0.17 | 0.15 | 0.13 |
+| **Unclear** (`unclear`) | 10 | 0.40 | 0.33 | 0.26 |
 
 ## App
 - **Participant:** record / upload / pick a sample → analysis (scores, overlay, flaw cards with playback, highlighted transcript, spectrum) → **My progress** (score trend, radar of first vs latest attempt, focus tips for the weakest criteria).
